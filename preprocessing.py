@@ -1,4 +1,3 @@
-
 """
 This script is used to clean the data before processing DBSCAN
 author: Omnia Kahla
@@ -17,18 +16,16 @@ import os
 import PreprocessingUtilities as pre
 
 if __name__=="__main__":
-    date= "2023-04-11" #"2022-12-24"#"2022-09-02"
-    outputfolder="SplitFileByMMSISortedByTime/"+date+"/"
-    data_file= f"../../AISData/aisdk-%s.csv"%date
-
-    df=pre.change_timestamp_format(date, outputfolder, data_file)
+    date= "2022-09-02"#"2023-04-11" #"2022-12-24"#"2022-09-02"
+    #outputfolder=date+"/SplitFileByMMSISortedByTime/"
+    data_file= f"aisdk-%s.csv"%date
+    df=pre.change_timestamp_format(date, data_file)
     print("Load completed!")
-    #print(df.columns)
-    mmsi_set = pre.generate_mmsi_file(outputfolder, df)
+    mmsi_set = pre.generate_mmsi_file(date, df)
     print("Done saving MMSI List to file")
-    #mmsi = "211547270"
-    if not os.path.exists(outputfolder+'CleanedFiles/'):
-            os.mkdir(outputfolder+'CleanedFiles/')
+    # #mmsi = "211547270"
+    if not os.path.exists(date+'/CleanedFiles/'):
+            os.mkdir(date+'/CleanedFiles/')
     for mmsi in mmsi_set:
         print(mmsi)
         df_temp = pre.sort_by_timestamp(df, mmsi)
@@ -38,6 +35,6 @@ if __name__=="__main__":
         print("start converting Lat/Long")
         # df_temp["geometry"]= df_temp.apply(lambda row: Point(row.Longitude, row.Latitude), axis=1)
         geodf = pre.extend_with_cartesian_coordinates(df_temp)
-        geodf.to_csv(path_or_buf=outputfolder+'CleanedFiles/'+str(mmsi)+".csv", index = False, mode='w', header=True, sep=',', index_label=None, encoding=None)
+        geodf.to_csv(path_or_buf=date+'/CleanedFiles/'+str(mmsi)+".csv", index = False, mode='w', header=True, sep=',', index_label=None, encoding=None)
         print("Done saving to file")
     
