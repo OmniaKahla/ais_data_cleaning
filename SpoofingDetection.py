@@ -177,8 +177,9 @@ def find_eps(sort_neigh_dist, leng):
         i+=1  
     return k_dist[i]
 
-date = "2022-09-02" #"2023-04-11"
+
 if __name__=="__main__": 
+    date = "2022-09-02" #"2023-04-11"
     mmsi_file = f"%s/MMSIList.csv" % date
     df_mmsi = load_data(mmsi_file)
     df_mmsi.columns=["MMSI"]
