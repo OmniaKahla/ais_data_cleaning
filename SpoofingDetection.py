@@ -60,10 +60,21 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
     clusters = DBSCAN(eps=eps, min_samples=min_samples).fit(df)
     unique_clusters=set(clusters.labels_)
     clusters_labels=list(clusters.labels_)
+    se = pd.Series(clusters_labels)
+    df_original['cluster_label'] = se.values
+    grouped = df_original.groupby('cluster_label') # To avoid the warning message remove the list
+    for name, group in grouped:
+        df_temporary=group
+        df_temporary.sort_values(by=['# Timestamp'])
+        print(name)
+        if name==-1:
+            df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_outlier.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)    
+        else: 
+            df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_trajectoryID_{name}.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)
     hasLocationSpoofing=False
     hasIdentitySpoofing=False
     has_problem=False
-    df_temp=pd.DataFrame(columns=["cluster_label","t", "x", "y"])
+    df_temp=pd.DataFrame(columns=["cluster_label","# Timestamp", "x", "y"])
     count_ofJumps=0
     calculatedSpeed=0
     num_of_points_speed_exceeds_1000=0
@@ -74,40 +85,32 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
         if current_Label != clusters_labels[i]:
             current_Label=clusters_labels[i]
             rec_in_cluster=df_original.iloc[i]
-            second_point = {'cluster_label': clusters_labels[i],'t':rec_in_cluster["# Timestamp"], 'x': rec_in_cluster["x"],'y':rec_in_cluster["y"]} 
+            second_point = {'cluster_label': clusters_labels[i],'# Timestamp':rec_in_cluster["# Timestamp"], 'x': rec_in_cluster["x"],'y':rec_in_cluster["y"]} 
             rec_in_cluster=df_original.iloc[i-1]
-            first_point = {'cluster_label': clusters_labels[i-1],'t':rec_in_cluster["# Timestamp"], 'x': rec_in_cluster["x"],'y':rec_in_cluster["y"]} 
-            calculatedSpeed,in_same_cluster=calculate_speed_between_points(first_point,second_point,eps)
-            if in_same_cluster:
-                continue
+            first_point = {'cluster_label': clusters_labels[i-1],'# Timestamp':rec_in_cluster["# Timestamp"], 'x': rec_in_cluster["x"],'y':rec_in_cluster["y"]} 
+            calculatedSpeed=calculate_speed_between_points(first_point,second_point)
             if calculatedSpeed >1000:
                 num_of_points_speed_exceeds_1000+=1
-            df_temp.loc[count_ofJumps]= first_point
-            df_temp.loc[count_ofJumps+1] = second_point
-            count_ofJumps+=2
-    df_temp["t"] = pd.to_datetime(df_temp["t"])
-    
+                df_temp.loc[count_ofJumps]= first_point
+                df_temp.loc[count_ofJumps+1] = second_point
+                count_ofJumps+=2
+    df_temp["# Timestamp"] = pd.to_datetime(df_temp["# Timestamp"])
     desityOfHops=count_ofJumps/len(df)
     density_of_points_speed_exceeds_1000 = num_of_points_speed_exceeds_1000/len(df)
-    # for i in range(0,len(df_temp),2):#checks if the #jumps between 2 clusters >10% of the points and speed>1000 then its identitySpoofing, else if the speed>1000 & # points<10% then LocationSpoofing
-    #     calculatedSpeed,in_same_cluster=calculate_speed_between_points(df_temp.loc[i],df_temp.loc[i+1],eps)
-    #     #print(f"calculatedSpeed = {calculatedSpeed}")
-    #     if calculatedSpeed >1000:
-    #         num_of_points_speed_exceeds_1000+=1
-    #     # if(calculatedSpeed>1000):
-    #     #     print(f"calculatedSpeed = {calculatedSpeed}, hasLocationSpoofing={hasLocationSpoofing},hasIdentitySpoofing={hasIdentitySpoofing} ")
-    # density_of_points_speed_exceeds_1000 = num_of_points_speed_exceeds_1000/len(df)
-    for i in range(0,len(clusters_labels)):
-        if density_of_points_speed_exceeds_1000>0.1 and  desityOfHops>0.1 :#densityOffirstCluster>0.1 and densityOfSecondCluster>0.1:
-            hasIdentitySpoofing,hasLocationSpoofing= calculated_speed_between_points_in_cluster(df_temp,eps, clusters_labels)
-            has_problem=True
-            #hasIdentitySpoofing=True
-        elif density_of_points_speed_exceeds_1000 < 0.1:
-            has_problem=True
-            hasLocationSpoofing=True
+    if  desityOfHops>0.1 and density_of_points_speed_exceeds_1000>0.1 :
+        has_problem=True
+        for name, group in grouped:
+            df_temporary=group
+            df_temporary.sort_values(by=['# Timestamp'])
+            hasLocationSpoofing= calculated_speed_between_points_in_cluster(df_temporary)
+        if hasLocationSpoofing==False:
+            hasIdentitySpoofing=True
+    elif density_of_points_speed_exceeds_1000 < 0.1 and density_of_points_speed_exceeds_1000>0:
+        has_problem=True
+        hasLocationSpoofing=True
     return has_problem,hasLocationSpoofing,hasIdentitySpoofing, len(unique_clusters)
 
-def calculate_speed_between_points(point1, point2,eps):
+def calculate_speed_between_points(point1, point2):
     """
     this function calculates the speed between 2 points
     it takes as input the 2 points
@@ -120,17 +123,14 @@ def calculate_speed_between_points(point1, point2,eps):
     calculated_Distance = math.sqrt(math.pow(
             (point1["x"]-point2["x"]), 2) + math.pow((point1["y"]-point2["y"]), 2))
     
-    time_diff = abs(pd.to_datetime(point2["t"])-pd.to_datetime(point1["t"]))
-    in_same_cluster=False
+    time_diff = abs(pd.to_datetime(point2["# Timestamp"])-pd.to_datetime(point1["# Timestamp"]))
     if time_diff.total_seconds() == 0:  # division over zero exception
         calculatedSpeed=0
     else:
         calculatedSpeed = calculated_Distance / time_diff.total_seconds()
-    if calculated_Distance<=eps:
-        in_same_cluster=True
-    return calculatedSpeed,in_same_cluster
+    return calculatedSpeed
 
-def calculated_speed_between_points_in_cluster(df_temp,eps, clusters_labels):
+def calculated_speed_between_points_in_cluster(df_temp):
     """
     this function calculates speed between points in a Cluster
     it takes as input the dataframe that contains the points where the cluster changes
@@ -139,25 +139,17 @@ def calculated_speed_between_points_in_cluster(df_temp,eps, clusters_labels):
     :return: hasLocationSpoofing,hasIdentitySpoofing
     """
     hasLocationSpoofing=False
-    hasIdentitySpoofing=False
-    df_temp=df_temp.sort_values(by=['cluster_label','t'])
-    cluster=df_temp.iloc[0]["cluster_label"]
+    #hasIdentitySpoofing=False
     for i in range(1,len(df_temp)):
-        if cluster==df_temp.iloc[i]["cluster_label"]:
-            calculatedSpeed, in_same_cluster=calculate_speed_between_points(df_temp.iloc[i-1],df_temp.iloc[i],eps)
-            if in_same_cluster:
-                hasLocationSpoofing=True
-                continue
-            elif calculatedSpeed>1000:
-                hasIdentitySpoofing=True
-                continue
-            else:
-                hasLocationSpoofing=True
-                continue
-        else:
-            cluster=df_temp.iloc[i]["cluster_label"]
-        
-    return hasLocationSpoofing,hasIdentitySpoofing
+        calculatedSpeed=calculate_speed_between_points(df_temp.iloc[i-1],df_temp.iloc[i])
+        if calculatedSpeed>1000:
+            hasLocationSpoofing=True
+            break
+        #     continue
+        # else:
+        #     hasIdentitySpoofing=True
+        #     continue
+    return hasLocationSpoofing#,hasIdentitySpoofing
 
 def find_eps(sort_neigh_dist, leng):
     """
@@ -187,17 +179,20 @@ if __name__=="__main__":
     mmsi_set = set(df_mmsi["MMSI"].tolist())
     outdf=pd.DataFrame(columns=["MMSI","hasProblem","hasLocationSpoofing","hasIdentitySpoofing", "CountOfClusters"])
     count=0
-
+    if not os.path.exists(date+"/clusters"):
+        os.mkdir(date+"/clusters")
     count_has_problem=0
     count_has_identity_spoofing=0
     count_has_location_spoofing=0
     for mmsi in mmsi_set:
-        #mmsi = "219015373"#"211547270" 
+        #mmsi = "211547270" # "219015373" # 
+        #mmsi=219028670
         print("mmsi is =", mmsi)
         file_path = f"{date}/CleanedFiles/{mmsi}.csv"
         df_temp = load_data(file_path)
         hasProblem,hasLocationSpoofing,hasIdentitySpoofing, numberOfClusters=get_cluster_insights(df_temp, 5,mmsi)
-        print(f"hasProblem = {hasProblem}, hasLocationSpoofing={hasLocationSpoofing},hasIdentitySpoofing={hasIdentitySpoofing} ")
+        if hasIdentitySpoofing or hasLocationSpoofing:
+            print(f"hasProblem = {hasProblem}, hasLocationSpoofing={hasLocationSpoofing},hasIdentitySpoofing={hasIdentitySpoofing} ")
         new_row = {'MMSI':mmsi, 'hasProblem': hasProblem,'hasLocationSpoofing':hasLocationSpoofing,
         'hasIdentitySpoofing':hasIdentitySpoofing, 'CountOfClusters': numberOfClusters}  
         outdf.loc[count] = new_row
@@ -207,11 +202,7 @@ if __name__=="__main__":
             count_has_identity_spoofing+=1
         if hasLocationSpoofing:
             count_has_location_spoofing+=1
-        #break
-        #print("index is =", count)
-        #break
-        # if count ==20:
-        #     break
         count+=1
+        
     print(f"count_has_problem = {count_has_problem}, count_has_identity_spoofing={count_has_identity_spoofing},count_has_location_spoofing={count_has_location_spoofing} ")
     outdf.to_csv(path_or_buf=f"{date}/ClassificationResults_{date}.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)
