@@ -63,14 +63,19 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
     se = pd.Series(clusters_labels)
     df_original['cluster_label'] = se.values
     grouped = df_original.groupby('cluster_label') # To avoid the warning message remove the list
+    df_groups=pd.DataFrame(columns=["cluster","length"])
+    df_groups.set_index('cluster')
     for name, group in grouped:
         df_temporary=group
         df_temporary.sort_values(by=['# Timestamp'])
-        print(name)
-        if name==-1:
-            df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_outlier.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)    
-        else: 
-            df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_trajectoryID_{name}.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)
+        #print(name)
+        df_groups.loc[str(name)]={"cluster": name, "length": len(group)}
+        #print(df_groups.loc[str(name)]["length"])
+        #ind+=1
+        # if name==-1:
+        #     df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_outlier.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)    
+        # else: 
+        df_temporary.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_trajectoryID_{name}.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)
     hasLocationSpoofing=False
     hasIdentitySpoofing=False
     has_problem=False
@@ -78,9 +83,13 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
     count_ofJumps=0
     calculatedSpeed=0
     num_of_points_speed_exceeds_1000=0
+    count_of_outliers=0
+    df_outliers = df_original.iloc[:0,:].copy()
     if len(unique_clusters)<=1: # only single trajectory
         return False, False, False, len(unique_clusters)
     current_Label=clusters_labels[0]
+    outlier_cluster_name=-2 
+    outlier_clusters=set()# creating a set of all outliers clusters
     for i in range (1, len(clusters_labels)):#adds the 2 consective points that are in different clusters
         if current_Label != clusters_labels[i]:
             current_Label=clusters_labels[i]
@@ -90,11 +99,24 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
             first_point = {'cluster_label': clusters_labels[i-1],'# Timestamp':rec_in_cluster["# Timestamp"], 'x': rec_in_cluster["x"],'y':rec_in_cluster["y"]} 
             calculatedSpeed=calculate_speed_between_points(first_point,second_point)
             if calculatedSpeed >1000:
+                #print(calculatedSpeed)
+                #outlier_point_index= compare_points(first_point,second_point,i)
                 num_of_points_speed_exceeds_1000+=1
-                df_temp.loc[count_ofJumps]= first_point
-                df_temp.loc[count_ofJumps+1] = second_point
-                count_ofJumps+=2
+                #if outlier_point_index==-1: # both points are not detected as outliers from DBSCAN, so the point which its cluster density is the smallest is an outlier
+                outlier_point_index, outlier_cluster_name=compare_cluster_density_return_outlier_index(first_point["cluster_label"], second_point["cluster_label"], i, df_groups)
+                outlier_clusters.add(str(outlier_cluster_name))
+                count_of_outliers+=1
+                df_outliers.loc[count_of_outliers]=df_original.iloc[outlier_point_index]
+                
+                # df_temp.loc[count_ofJumps]= first_point
+                # df_temp.loc[count_ofJumps+1] = second_point
+                # count_ofJumps+=2
     df_temp["# Timestamp"] = pd.to_datetime(df_temp["# Timestamp"])
+    #print(outlier_clusters)
+    #print(len(df_outliers))
+    if len(df_outliers)!=0:
+        df_outliers.drop_duplicates(subset=['# Timestamp', 'Latitude', 'Longitude'], keep='last', inplace=True)
+        df_outliers.to_csv(path_or_buf=f"{date}/clusters/{mmsi}_outlier.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)    
     desityOfHops=count_ofJumps/len(df)
     density_of_points_speed_exceeds_1000 = num_of_points_speed_exceeds_1000/len(df)
     if  desityOfHops>0.1 and density_of_points_speed_exceeds_1000>0.1 :
@@ -109,6 +131,24 @@ def get_cluster_insights(df_original, n_neighbors,mmsi):
         has_problem=True
         hasLocationSpoofing=True
     return has_problem,hasLocationSpoofing,hasIdentitySpoofing, len(unique_clusters)
+
+# def compare_points(first_point,second_point, index):
+#     if first_point["cluster_label"] == -1:
+#         print("first point" , first_point)
+#         return index-1
+#     elif second_point["cluster_label"] ==-1:
+#         print("second point", second_point)
+#         return index
+#     return -1
+
+def compare_cluster_density_return_outlier_index(cluster1, cluster2, index, df_groups):
+   # print(df_groups.loc[str(cluster1)]["length"], df_groups.loc[str(cluster2)]["length"])
+    if df_groups.loc[str(cluster1)]["length"] > df_groups.loc[str(cluster2)]["length"] :
+       # print (cluster2 ," cluster 2 has ", df_groups.loc[str(cluster2)]["length"] ,"# of points and is the smallest")
+        return index, cluster2
+    else:
+       # print (cluster1, " cluster 1 has ", df_groups.loc[str(cluster1)]["length"] ,"# of points and is the smallest")
+        return index-1, cluster1
 
 def calculate_speed_between_points(point1, point2):
     """
@@ -185,8 +225,9 @@ if __name__=="__main__":
     count_has_identity_spoofing=0
     count_has_location_spoofing=0
     for mmsi in mmsi_set:
-        #mmsi = "211547270" # "219015373" # 
+        #mmsi = "211547270" # "219015373" # 622
         #mmsi=219028670
+        #mmsi=219021388
         print("mmsi is =", mmsi)
         file_path = f"{date}/CleanedFiles/{mmsi}.csv"
         df_temp = load_data(file_path)
@@ -203,6 +244,6 @@ if __name__=="__main__":
         if hasLocationSpoofing:
             count_has_location_spoofing+=1
         count+=1
-        
+        #break
     print(f"count_has_problem = {count_has_problem}, count_has_identity_spoofing={count_has_identity_spoofing},count_has_location_spoofing={count_has_location_spoofing} ")
     outdf.to_csv(path_or_buf=f"{date}/ClassificationResults_{date}.csv", sep=',', header=True, index=False, index_label=None, mode='w', encoding=None)
